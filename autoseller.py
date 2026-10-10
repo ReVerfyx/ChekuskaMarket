@@ -320,10 +320,16 @@ def publish_one(account, category, sections, state):
 
     section = choose_section(sections)
     if section is None:
+        LOG.warning("⏭️ %s: нет подходящего обычного раздела", game)
         return "unsupported"
 
-    generated = make_guide(game, search_game(game))
+    LOG.info("🔎 %s: ищу источники...", game)
+    sources = search_game(game)
+    LOG.info("🌐 %s: найдено %s результатов из %s доменов", game, len(sources), len({x["domain"] for x in sources}))
+    LOG.info("🤖 %s: отправляю найденное в Qwen...", game)
+    generated = make_guide(game, sources)
     if not generated:
+        LOG.warning("⏭️ %s: недостаточно подтверждённых данных, лот пока не создаю", game)
         state["categories"][key] = {"game": game, "status": "research_failed", "updated_at": utcnow()}
         save_state(state)
         return "research_failed"
@@ -331,6 +337,7 @@ def publish_one(account, category, sections, state):
     node_id = int(section.id)
     title = title_for(game, generated["topic"])
     price = price_for(account, node_id)
+    LOG.info("📝 %s: готов лот | раздел=%s | цена=%s ₽ | %s", game, getattr(section, "name", node_id), price, title)
 
     if bot.DRY_RUN:
         print(f"[DRY_RUN publish] {cid} | {game} | node={node_id} | {price} | {title}")
@@ -359,6 +366,7 @@ def publish_one(account, category, sections, state):
         "title": title, "price": price, "updated_at": utcnow(),
     }
     save_state(state)
+    LOG.info("📤 %s: публикую лот в FunPay...", game)
     try:
         account.save_lot(fields)
     except Exception as exc:
@@ -372,6 +380,7 @@ def publish_one(account, category, sections, state):
     state["categories"][key]["status"] = "published"
     state["categories"][key]["updated_at"] = utcnow()
     save_state(state)
+    LOG.info("✅ %s: лот опубликован", game)
     return "published"
 
 
@@ -382,10 +391,14 @@ def cycle(account):
     limit = max(0, int(os.getenv("AUTOPUBLISH_MAX_NEW_PER_CYCLE", "0")))
     delay = max(0.0, float(os.getenv("AUTOPUBLISH_DELAY_SECONDS", "15")))
     created = 0
+    games = game_sections(account)
+    LOG.info("🚀 Начинаю проход: %s игровых категорий, уже в state: %s", len(games), len(state["categories"]))
 
-    for category, sections in game_sections(account):
+    for index, (category, sections) in enumerate(games, 1):
         current = state["categories"].get(str(int(category.id)), {}).get("status")
+        LOG.info("🎮 [%s/%s] %s | текущий статус: %s", index, len(games), category.name, current or "нет")
         if current in {"published", "attempted", "recovered"}:
+            LOG.info("↪️ %s: уже обработана, пропускаю", category.name)
             counts[current] = counts.get(current, 0) + 1
             continue
         if limit and created >= limit:
@@ -401,6 +414,7 @@ def cycle(account):
         if delay and result in {"published", "dry_run", "error"}:
             time.sleep(delay)
 
+    LOG.info("📊 Проход по играм завершён: %s", counts)
     try:
         bot.raise_lots_once(account)
     except Exception:
