@@ -8,7 +8,9 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
+import threading
 import time
 from urllib.parse import urlparse
 import urllib.error
@@ -25,6 +27,46 @@ STATE = bot.ROOT / "data" / "autopublish.json"
 GUIDE_WORDS = ("гайд", "guide")
 OTHER_WORDS = ("прочее", "другое", "other", "misc")
 BAD_WORDS = ("аккаунт", "account", "валют", "currency", "прокач", "service", "услуг", "предмет", "item")
+
+
+class StageTimeout(TimeoutError):
+    pass
+
+
+def _heartbeat(label, stop, started, every):
+    while not stop.wait(every):
+        LOG.info("⏱️ %s: всё ещё выполняется, прошло %.1f сек", label, time.monotonic() - started)
+
+
+def run_stage(label, func, timeout=None):
+    """Run a blocking stage with 5s heartbeat and a hard SIGALRM timeout on Linux."""
+    heartbeat = max(2.0, float(os.getenv("AUTOPUBLISH_LOG_HEARTBEAT_SECONDS", "5")))
+    started = time.monotonic()
+    stop = threading.Event()
+    worker = threading.Thread(target=_heartbeat, args=(label, stop, started, heartbeat), daemon=True)
+    worker.start()
+    old_handler = None
+
+    def _alarm(signum, frame):
+        raise StageTimeout(f"{label}: timeout after {timeout}s")
+
+    try:
+        if timeout and threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGALRM"):
+            old_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _alarm)
+            signal.setitimer(signal.ITIMER_REAL, float(timeout))
+        LOG.info("▶️ %s: старт | timeout=%s", label, f"{timeout}s" if timeout else "нет")
+        result = func()
+        LOG.info("✅ %s: готово за %.1f сек", label, time.monotonic() - started)
+        return result
+    except Exception as exc:
+        LOG.exception("❌ %s: ошибка через %.1f сек | %s: %s", label, time.monotonic() - started, type(exc).__name__, exc)
+        raise
+    finally:
+        if old_handler is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+        stop.set()
 
 
 def utcnow():
@@ -94,13 +136,17 @@ def search_game(game):
         f'"{game}" wiki beginner tips',
     ]
     out, seen = [], set()
+    max_results = max(4, int(os.getenv("AUTOPUBLISH_SEARCH_RESULTS", "8")))
     with DDGS(timeout=20) as search:
-        for query in queries:
+        for index, query in enumerate(queries, 1):
+            started = time.monotonic()
+            LOG.info("🔍 %s: поиск [%s/%s] %r | max_results=%s", game, index, len(queries), query, max_results)
             try:
-                results = search.text(query, max_results=max(4, int(os.getenv("AUTOPUBLISH_SEARCH_RESULTS", "8"))))
+                results = search.text(query, max_results=max_results)
             except Exception as exc:
-                LOG.warning("search %s: %s", game, type(exc).__name__)
+                LOG.exception("⚠️ %s: поиск [%s/%s] упал через %.1f сек | %s: %s", game, index, len(queries), time.monotonic() - started, type(exc).__name__, exc)
                 continue
+            added = 0
             for row in results or []:
                 url = str(row.get("href", "") or "")
                 snippet = re.sub(r"\s+", " ", str(row.get("body", "") or "")).strip()
@@ -114,8 +160,11 @@ def search_game(game):
                     "snippet": snippet[:900],
                     "domain": host,
                 })
+                added += 1
                 if len(out) >= 12:
+                    LOG.info("✅ %s: поиск закончен досрочно | всего=%s | доменов=%s", game, len(out), len({x["domain"] for x in out}))
                     return out
+            LOG.info("✅ %s: поиск [%s/%s] закончен за %.1f сек | +%s | всего=%s", game, index, len(queries), time.monotonic() - started, added, len(out))
             if len(out) >= 6 and len({x["domain"] for x in out}) >= 3:
                 return out
     return out
@@ -162,62 +211,80 @@ text_en и topic_en — только перевод русской версии,
         },
     }
 
-    timeout = max(10, int(os.getenv("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "45")))
+    timeout = max(30, int(os.getenv("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "120")))
+    heartbeat = max(2.0, float(os.getenv("AUTOPUBLISH_LOG_HEARTBEAT_SECONDS", "5")))
     started = time.monotonic()
+    request_json = json.dumps(payload, ensure_ascii=False)
     LOG.info(
-        "⏳ %s: Qwen начал генерацию | жёсткий timeout=%ss | max_tokens=%s | sources=%s",
-        game, timeout, payload["options"]["num_predict"], len(rows)
+        "▶️ QWEN %s: модель=%s | sources=%s | prompt_bytes=%s | max_tokens=%s | timeout=%ss",
+        game, payload["model"], len(rows), len(request_json.encode("utf-8")), payload["options"]["num_predict"], timeout
     )
 
-    # curl is intentionally executed as a child process: subprocess timeout is a real
-    # wall-clock limit. If Ollama hangs, Python kills curl and the autoseller continues.
-    try:
-        proc = subprocess.run(
-            [
-                "curl", "--silent", "--show-error", "--fail-with-body",
-                "--max-time", str(timeout),
-                "-H", "Content-Type: application/json",
-                "--data-binary", "@-",
-                url + "/api/chat",
-            ],
-            input=json.dumps(payload, ensure_ascii=False),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout + 5,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
+    proc = subprocess.Popen(
+        [
+            "curl", "--silent", "--show-error", "--fail-with-body",
+            "--max-time", str(timeout),
+            "-H", "Content-Type: application/json",
+            "--data-binary", "@-",
+            url + "/api/chat",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdin is not None
+    proc.stdin.write(request_json)
+    proc.stdin.close()
+
+    while proc.poll() is None:
         elapsed = time.monotonic() - started
-        LOG.warning("⏱️ %s: Qwen жёстко остановлен через %.1f сек; иду к следующей игре", game, elapsed)
-        return None
+        if elapsed >= timeout:
+            LOG.error("⏱️ QWEN %s: достигнут hard-timeout %.1f сек, убиваю curl", game, elapsed)
+            proc.kill()
+            proc.wait(timeout=5)
+            return None
+        LOG.info("⏳ QWEN %s: жду ответ... %.1f/%s сек", game, elapsed, timeout)
+        time.sleep(min(heartbeat, max(0.2, timeout - elapsed)))
 
     elapsed = time.monotonic() - started
+    stdout = proc.stdout.read() if proc.stdout is not None else ""
+    stderr = proc.stderr.read() if proc.stderr is not None else ""
+    LOG.info("⬅️ QWEN %s: процесс завершён | rc=%s | %.1f сек | stdout=%sB | stderr=%sB", game, proc.returncode, elapsed, len(stdout.encode("utf-8")), len(stderr.encode("utf-8")))
+
     if proc.returncode != 0:
-        LOG.warning(
-            "⚠️ %s: Ollama/curl завершился с кодом %s через %.1f сек: %s",
-            game, proc.returncode, elapsed, proc.stderr.strip()[:300]
-        )
+        LOG.error("❌ QWEN %s: curl rc=%s | stderr=%r | stdout_head=%r", game, proc.returncode, stderr[:500], stdout[:500])
         return None
 
     try:
-        envelope = json.loads(proc.stdout)
-        raw = str(envelope["message"]["content"]).strip()
-    except (json.JSONDecodeError, KeyError, TypeError):
-        LOG.warning("⚠️ %s: Ollama вернула некорректный ответ через %.1f сек", game, elapsed)
+        envelope = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        LOG.error("❌ QWEN %s: внешний JSON Ollama не разбирается | %s | head=%r", game, exc, stdout[:700])
         return None
 
-    LOG.info("⚡ %s: Qwen ответил за %.1f сек", game, elapsed)
+    raw = str((envelope.get("message") or {}).get("content") or "").strip()
+    LOG.info(
+        "🧠 QWEN %s: ответ получен | content_chars=%s | done_reason=%r | eval_count=%r | eval_duration=%r",
+        game, len(raw), envelope.get("done_reason"), envelope.get("eval_count"), envelope.get("eval_duration")
+    )
+    if not raw:
+        LOG.error("❌ QWEN %s: message.content пустой | envelope_keys=%s", game, sorted(envelope.keys()))
+        return None
+
     try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
+        parsed_content = json.loads(raw)
+        LOG.info("✅ QWEN %s: JSON контента валиден", game)
+        return parsed_content
+    except json.JSONDecodeError as first_exc:
         found = re.search(r"\{.*\}", raw, re.S)
         if found:
             try:
-                return json.loads(found.group())
+                parsed_content = json.loads(found.group())
+                LOG.warning("⚠️ QWEN %s: JSON извлечён из лишнего текста модели", game)
+                return parsed_content
             except json.JSONDecodeError:
                 pass
-        LOG.warning("⚠️ %s: Qwen вернул невалидный JSON", game)
+        LOG.error("❌ QWEN %s: контент невалидный JSON | %s | head=%r", game, first_exc, raw[:700])
         return None
 
 
@@ -481,7 +548,14 @@ def publish_one(account, category, sections, state):
         save_state(state)
         return "dry_run"
 
-    fields = create_fields(account, node_id)
+    form_timeout = max(15, int(os.getenv("AUTOPUBLISH_FUNPAY_FORM_TIMEOUT_SECONDS", "60")))
+    save_timeout = max(15, int(os.getenv("AUTOPUBLISH_FUNPAY_SAVE_TIMEOUT_SECONDS", "60")))
+    fields = run_stage(
+        f"FUNPAY {game}: получить форму node={node_id}",
+        lambda: create_fields(account, node_id),
+        timeout=form_timeout,
+    )
+    LOG.info("✍️ FUNPAY %s: заполняю RU/EN поля, цену, флаги и автовыдачу", game)
     fields.title_ru = title_ru
     fields.title_en = title_en
     fields.description_ru = description_ru_for(
@@ -511,21 +585,32 @@ def publish_one(account, category, sections, state):
         "📦 %s: автовыдача включена, запас=%s одинаковых выдач, лот остаётся активным после продажи",
         game, len(fields.secrets)
     )
-    LOG.info("📤 %s: публикую лот в FunPay...", game)
+    LOG.info("📤 FUNPAY %s: вызываю save_lot | node=%s | price=%s | stock=%s", game, node_id, price, len(fields.secrets))
+    save_started = time.monotonic()
     try:
-        account.save_lot(fields)
+        result = run_stage(
+            f"FUNPAY {game}: save_lot",
+            lambda: account.save_lot(fields),
+            timeout=save_timeout,
+        )
+        LOG.info("📨 FUNPAY %s: save_lot вернулся за %.1f сек | result_type=%s | result=%r", game, time.monotonic() - save_started, type(result).__name__, str(result)[:500])
     except Exception as exc:
         state["categories"][key]["error"] = type(exc).__name__
+        state["categories"][key]["error_message"] = str(exc)[:1000]
+        state["categories"][key]["failed_stage"] = "funpay_save_lot"
         state["categories"][key]["updated_at"] = utcnow()
         if type(exc).__name__ == "LotSavingError":
             state["categories"][key]["status"] = "form_rejected"
+        else:
+            state["categories"][key]["status"] = "publish_error"
         save_state(state)
+        LOG.exception("❌ FUNPAY %s: публикация НЕ удалась | %s: %s", game, type(exc).__name__, exc)
         raise
 
     state["categories"][key]["status"] = "published"
     state["categories"][key]["updated_at"] = utcnow()
     save_state(state)
-    LOG.info("✅ %s: лот опубликован", game)
+    LOG.info("✅ FUNPAY %s: лот опубликован и state сохранён", game)
     return "published"
 
 
