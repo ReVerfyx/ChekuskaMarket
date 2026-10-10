@@ -173,9 +173,8 @@ def main() -> None:
     env["AUTOPUBLISH_SEARCH_RESULTS"] = str(
         ask_int("Результатов поиска на запрос", int(env.get("AUTOPUBLISH_SEARCH_RESULTS", "8")), 4)
     )
-    env["AUTOPUBLISH_MIN_SOURCES"] = str(
-        ask_int("Минимум разных источников для публикации", int(env.get("AUTOPUBLISH_MIN_SOURCES", "2")), 2)
-    )
+    # Fixed policy: two independent sources are enough. Do not inherit an old value such as 7.
+    env["AUTOPUBLISH_MIN_SOURCES"] = "2"
     env["AUTOPUBLISH_QWEN_TIMEOUT_SECONDS"] = str(
         ask_int("Жёсткий таймаут Qwen на одну игру, секунд", int(env.get("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "120")), 120)
     )
