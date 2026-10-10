@@ -163,31 +163,86 @@ def search_game_name(game):
     return re.sub(r"\s+", " ", value).strip() or str(game).strip()
 
 
+def _search_one_backend(search, query, backend, max_results, timeout):
+    started = time.monotonic()
+    old_handler = None
+
+    def _alarm(signum, frame):
+        raise StageTimeout("search timeout")
+
+    try:
+        if threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGALRM"):
+            old_handler = signal.getsignal(signal.SIGALRM)
+            signal.signal(signal.SIGALRM, _alarm)
+            signal.setitimer(signal.ITIMER_REAL, float(timeout))
+        return search.text(
+            query,
+            max_results=max_results,
+            backend=backend,
+            safesearch="moderate",
+        )
+    finally:
+        if old_handler is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+        LOG.debug("search backend=%s elapsed=%.2f", backend, time.monotonic() - started)
+
+
 def search_game(game):
     year = datetime.now(timezone.utc).year
     query_game = search_game_name(game)
     if query_game != game:
         LOG.info("   🧹 Поиск по названию: %s → %s", game, query_game)
+
     queries = [
-        ("свежий beginner-гайд", f'"{query_game}" {year} beginner guide tips'),
-        ("официальные механики", f'"{query_game}" official guide mechanics'),
-        ("wiki / beginner tips", f'"{query_game}" wiki beginner tips'),
+        f'"{query_game}" {year} beginner guide tips',
+        f'"{query_game}" guide mechanics tips',
+        f'"{query_game}" гайд новичкам советы',
     ]
-    out, seen = [], set()
-    max_results = max(4, int(os.getenv("AUTOPUBLISH_SEARCH_RESULTS", "8")))
-    with DDGS(timeout=20) as search:
-        for index, (label, query) in enumerate(queries, 1):
+
+    # Do not use backend="auto" here. On this VPS DuckDuckGo/Brave/Google
+    # often timeout/403/429 and can make the whole metasearch fail even when
+    # Yahoo or Startpage are healthy.
+    backends = [
+        x.strip()
+        for x in os.getenv(
+            "AUTOPUBLISH_SEARCH_BACKENDS",
+            "yahoo,startpage,bing,wikipedia",
+        ).split(",")
+        if x.strip()
+    ]
+    timeout = max(3, int(os.getenv("AUTOPUBLISH_SEARCH_TIMEOUT_SECONDS", "6")))
+    max_results = max(2, int(os.getenv("AUTOPUBLISH_SEARCH_RESULTS", "6")))
+    target_domains = 2
+
+    out, seen_urls, seen_domains = [], set(), set()
+    search = DDGS(timeout=timeout)
+
+    for query_index, query in enumerate(queries, 1):
+        for backend in backends:
             started = time.monotonic()
-            LOG.info("   🔎 Поиск %s/%s — %s", index, len(queries), label)
+            LOG.info("   🔎 Поиск — %s", backend)
             try:
-                results = search.text(query, max_results=max_results)
-            except Exception as exc:
-                LOG.warning(
-                    "   ⚠️ Поиск %s/%s — %.1f сек — %s: %s",
-                    index, len(queries), time.monotonic() - started, type(exc).__name__, str(exc)[:180]
+                results = _search_one_backend(
+                    search,
+                    query,
+                    backend,
+                    max_results,
+                    timeout,
                 )
+            except Exception as exc:
+                elapsed = time.monotonic() - started
+                is_timeout = (
+                    isinstance(exc, (StageTimeout, TimeoutError))
+                    or "timeout" in type(exc).__name__.lower()
+                    or "timed out" in str(exc).lower()
+                )
+                if is_timeout:
+                    LOG.warning("   ⚠️ %s — таймаут %.1f сек, следующий движок", backend, elapsed)
+                else:
+                    LOG.warning("   ⚠️ %s — %s, следующий движок", backend, type(exc).__name__)
                 if verbose_tracebacks():
-                    LOG.exception("DEBUG traceback поиска %s", game)
+                    LOG.exception("DEBUG search backend=%s query=%r", backend, query)
                 continue
 
             added = 0
@@ -195,9 +250,15 @@ def search_game(game):
                 url = str(row.get("href", "") or "")
                 snippet = re.sub(r"\s+", " ", str(row.get("body", "") or "")).strip()
                 host = domain(url)
-                if not url.startswith(("https://", "http://")) or not host or url in seen or len(snippet) < 70:
+                if (
+                    not url.startswith(("https://", "http://"))
+                    or not host
+                    or url in seen_urls
+                    or len(snippet) < 70
+                ):
                     continue
-                seen.add(url)
+                seen_urls.add(url)
+                seen_domains.add(host)
                 out.append({
                     "title": str(row.get("title", "") or "")[:180],
                     "url": url,
@@ -205,18 +266,23 @@ def search_game(game):
                     "domain": host,
                 })
                 added += 1
-                if len(out) >= 12:
-                    LOG.info("   ✅ Источники: %s результатов / %s сайтов", len(out), len({x["domain"] for x in out}))
-                    return out
 
             LOG.info(
-                "   ✅ Поиск %s/%s — %.1f сек — +%s результатов",
-                index, len(queries), time.monotonic() - started, added
+                "   ✅ %s — %.1f сек — +%s | сайтов=%s",
+                backend,
+                time.monotonic() - started,
+                added,
+                len(seen_domains),
             )
-            if len(out) >= 6 and len({x["domain"] for x in out}) >= 3:
-                break
 
-    LOG.info("   🌐 Итого: %s результатов / %s сайтов", len(out), len({x["domain"] for x in out}))
+            if len(seen_domains) >= target_domains:
+                LOG.info("   🌐 Достаточно: %s результатов / %s сайта", len(out), len(seen_domains))
+                return out
+
+        if query_index < len(queries):
+            LOG.info("   🔁 Пока меньше 2 сайтов — меняю поисковый запрос")
+
+    LOG.info("   🌐 Итого: %s результатов / %s сайтов", len(out), len(seen_domains))
     return out
 
 
