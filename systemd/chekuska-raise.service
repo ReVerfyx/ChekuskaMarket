@@ -1,5 +1,5 @@
 [Unit]
-Description=ChekuskaMarket FunPay lot auto-raise
+Description=ChekuskaMarket autonomous FunPay publisher and lot auto-raise
 After=network-online.target
 Wants=network-online.target
 
