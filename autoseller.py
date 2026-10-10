@@ -289,6 +289,18 @@ def description_en_for(game, topic, source_count):
     )
 
 
+def encode_auto_delivery_item(text):
+    """FunPay: one physical line = one product; use literal \\n inside a product."""
+    value = str(text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return value.replace("\n", "\\n")
+
+
+def auto_delivery_stock(text):
+    copies = max(2, int(os.getenv("AUTOPUBLISH_STOCK_COPIES", "50")))
+    item = encode_auto_delivery_item(text)
+    return [item for _ in range(copies)]
+
+
 def create_fields(account, node_id):
     from FunPayAPI import types
     response = account.method("get", f"lots/offerEdit?node={node_id}", {"accept": "*/*"}, {}, raise_not_200=True)
@@ -430,13 +442,19 @@ def publish_one(account, category, sections, state):
     fields.auto_delivery = True
     fields.active = True
     fields.deactivate_after_sale = False
-    fields.secrets = [generated["guide"]]
+    # Full RU+EN guide goes ONLY into FunPay auto-delivery.
+    # Description above remains a short storefront description.
+    fields.secrets = auto_delivery_stock(generated["guide"])
 
     state["categories"][key] = {
         "game": game, "status": "attempted", "node_id": node_id,
         "title": title_ru, "title_en": title_en, "price": price, "updated_at": utcnow(),
     }
     save_state(state)
+    LOG.info(
+        "📦 %s: автовыдача включена, запас=%s одинаковых выдач, лот остаётся активным после продажи",
+        game, len(fields.secrets)
+    )
     LOG.info("📤 %s: публикую лот в FunPay...", game)
     try:
         account.save_lot(fields)
