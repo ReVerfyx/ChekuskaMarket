@@ -15,6 +15,11 @@ class AutoSellerTest(unittest.TestCase):
             category=SimpleNamespace(id=cid, name=game),
         )
 
+    def test_search_game_name_strips_funpay_region(self):
+        self.assertEqual(autoseller.search_game_name("World of Warcraft (RU, EU)"), "World of Warcraft")
+        self.assertEqual(autoseller.search_game_name("Lineage 2 (RU)"), "Lineage 2")
+        self.assertEqual(autoseller.search_game_name("Counter-Strike 2"), "Counter-Strike 2")
+
     def test_groups_once_per_game_and_prefers_guides(self):
         account = SimpleNamespace(subcategories=[
             self.section(1, "Items", 1, "A"),
