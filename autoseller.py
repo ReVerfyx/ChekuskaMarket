@@ -147,7 +147,7 @@ text_en и topic_en — только перевод русской версии,
 Если данных мало: {"skip":true}."""
 
     payload = {
-        "model": os.getenv("OLLAMA_MODEL", "qwen3:4b"),
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
         "stream": False,
         "think": False,
         "keep_alive": os.getenv("AUTOPUBLISH_QWEN_KEEP_ALIVE", "30m"),
