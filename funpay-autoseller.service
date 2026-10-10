@@ -1,0 +1,18 @@
+[Unit]
+Description=FunPay autonomous guide research and listing
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=funpay
+WorkingDirectory=/opt/funpay-assistant
+EnvironmentFile=/opt/funpay-assistant/.env
+ExecStart=/opt/funpay-assistant/.venv/bin/python /opt/funpay-assistant/autoseller.py loop
+Restart=always
+RestartSec=30
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
