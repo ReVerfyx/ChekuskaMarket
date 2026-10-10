@@ -1,0 +1,12 @@
+{
+  "steal_egg": {
+    "command": ["/opt/funpay-assistant/workers/steal-egg-worker"],
+    "timeout_seconds": 3600,
+    "private_server": null
+  },
+  "gag2_demo": {
+    "command": ["/opt/funpay-assistant/workers/gag2-worker"],
+    "timeout_seconds": 3600,
+    "private_server": null
+  }
+}
