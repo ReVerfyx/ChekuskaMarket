@@ -12,6 +12,9 @@ fi
 apt-get update
 apt-get install -y git curl ca-certificates python3 python3-venv python3-pip sudo
 
+# Stop an older running copy before replacing its files.
+systemctl stop chekuska-funpay.service chekuska-raise.service >/dev/null 2>&1 || true
+
 # Always synchronize the application before setup. If this script itself was old,
 # restart from the freshly synchronized copy so the rest of installation uses new code.
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
