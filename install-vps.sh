@@ -10,13 +10,12 @@ if [[ $(id -u) -ne 0 ]]; then
 fi
 
 apt-get update
-apt-get install -y git python3 python3-venv python3-pip
+apt-get install -y git curl ca-certificates python3 python3-venv python3-pip sudo
 
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home "$PROJECT_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
 
-# Script is intended to be run from an already cloned repository.
 SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ "$SOURCE_DIR" != "$PROJECT_DIR" ]]; then
   rm -rf "$PROJECT_DIR"
@@ -36,6 +35,12 @@ else
   git -C vendor/FunPayAPI pull --ff-only
 fi
 
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "[+] Устанавливаю Ollama..."
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+systemctl enable --now ollama >/dev/null 2>&1 || true
+
 if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
@@ -47,8 +52,54 @@ cp systemd/chekuska-raise.service /etc/systemd/system/
 systemctl daemon-reload
 
 echo
-printf 'Установлено: %s\n' "$PROJECT_DIR"
-echo "1) nano $PROJECT_DIR/.env"
-echo "2) sudo -u $SERVICE_USER $PROJECT_DIR/.venv/bin/python $PROJECT_DIR/bot.py catalog"
-echo "3) systemctl enable --now chekuska-funpay"
-echo "4) опционально: systemctl enable --now chekuska-raise"
+echo "════════════════════════════════════════════"
+echo "       Первичная настройка ChekuskaMarket"
+echo "════════════════════════════════════════════"
+sudo -u "$SERVICE_USER" -H "$PROJECT_DIR/.venv/bin/python" "$PROJECT_DIR/setup.py"
+
+AI_ENABLED="$(grep -E '^AI_ENABLED=' .env | tail -1 | cut -d= -f2- || true)"
+OLLAMA_MODEL="$(grep -E '^OLLAMA_MODEL=' .env | tail -1 | cut -d= -f2- || true)"
+DRY_RUN="$(grep -E '^DRY_RUN=' .env | tail -1 | cut -d= -f2- || true)"
+AUTOPUBLISH_ENABLED="$(grep -E '^AUTOPUBLISH_ENABLED=' .env | tail -1 | cut -d= -f2- || true)"
+
+if [[ "$AI_ENABLED" == "1" && -n "$OLLAMA_MODEL" ]]; then
+  echo
+  echo "[+] Загружаю модель Ollama: $OLLAMA_MODEL"
+  ollama pull "$OLLAMA_MODEL"
+fi
+
+echo
+echo "[+] Проверяю Python..."
+sudo -u "$SERVICE_USER" "$PROJECT_DIR/.venv/bin/python" -m py_compile   "$PROJECT_DIR/bot.py" "$PROJECT_DIR/autoseller.py" "$PROJECT_DIR/setup.py"
+sudo -u "$SERVICE_USER" "$PROJECT_DIR/.venv/bin/python" -m unittest -v
+
+if [[ "$DRY_RUN" == "0" ]]; then
+  echo
+  echo "[+] Запускаю основной FunPay-бот..."
+  systemctl enable --now chekuska-funpay
+  if [[ "$AUTOPUBLISH_ENABLED" == "1" ]]; then
+    echo "[+] Запускаю автономную публикацию..."
+    systemctl enable --now chekuska-raise
+  else
+    systemctl disable --now chekuska-raise >/dev/null 2>&1 || true
+  fi
+
+  sleep 2
+  echo
+  systemctl --no-pager --full status chekuska-funpay | sed -n '1,12p' || true
+  if [[ "$AUTOPUBLISH_ENABLED" == "1" ]]; then
+    systemctl --no-pager --full status chekuska-raise | sed -n '1,12p' || true
+  fi
+  echo
+  echo "✅ ChekuskaMarket запущен."
+  echo "Логи бота:       journalctl -u chekuska-funpay -f"
+  echo "Логи публикации: journalctl -u chekuska-raise -f"
+else
+  systemctl disable --now chekuska-funpay chekuska-raise >/dev/null 2>&1 || true
+  echo
+  echo "✅ Установка завершена в DRY_RUN=1."
+  echo "Тест: sudo -u $SERVICE_USER $PROJECT_DIR/.venv/bin/python $PROJECT_DIR/autoseller.py once"
+  echo "Для реального запуска снова выполни:"
+  echo "sudo -u $SERVICE_USER $PROJECT_DIR/.venv/bin/python $PROJECT_DIR/setup.py"
+  echo "а затем: sudo systemctl enable --now chekuska-funpay chekuska-raise"
+fi

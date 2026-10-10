@@ -16,36 +16,46 @@
 
 FunPay-интеграция неофициальная. `golden_key` равен доступу к аккаунту: храните его только в `.env` на VPS.
 
-## Ubuntu 24.04
+## Ubuntu 24.04 — установка и первый запуск
+
+Нужна одна установка:
 
 ```bash
 git clone https://github.com/ReVerfyx/ChekuskaMarket.git /opt/chekuska-market
 cd /opt/chekuska-market
 sudo bash install-vps.sh
-sudo nano /opt/chekuska-market/.env
 ```
 
-Минимум в `.env`:
+Дальше откроется встроенный мастер **«🤖 ChekuskaMarket — первый запуск»**. Он сам спросит:
 
-```env
-FUNPAY_GOLDEN_KEY=ваш_golden_key
-DRY_RUN=1
-OLLAMA_MODEL=qwen3:4b
-```
+- FunPay `golden_key` скрытым вводом;
+- использовать ли Qwen;
+- модель Ollama;
+- включить ли авто-лот в каждой игре;
+- базовую цену;
+- число источников;
+- паузу между публикациями;
+- сколько новых игр обрабатывать за проход;
+- запускать ли реальные продажи сразу.
 
-Если нужен Qwen:
+Установщик сам ставит зависимости и Ollama, проверяет вход в FunPay, скачивает выбранную модель, запускает тесты и после успешной настройки включает `chekuska-funpay` и `chekuska-raise`.
 
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-ollama pull qwen3:4b
-```
+Для обычного запуска выбирай **«Сразу запустить реальные продажи и публикацию» → Да**. Тогда мастер запишет `DRY_RUN=0` и после завершения бот сразу начнёт работать.
 
-Проверка до реального запуска:
+Повторно открыть первичную настройку:
 
 ```bash
 cd /opt/chekuska-market
-sudo -u funpay .venv/bin/python bot.py catalog
-sudo -u funpay .venv/bin/python -m unittest -v
+sudo -u funpay .venv/bin/python setup.py
+sudo systemctl restart chekuska-funpay chekuska-raise
+```
+
+Проверить:
+
+```bash
+systemctl status chekuska-funpay --no-pager
+systemctl status chekuska-raise --no-pager
+journalctl -u chekuska-funpay -f
 ```
 
 ## Товары
