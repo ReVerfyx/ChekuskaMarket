@@ -427,7 +427,7 @@ evidence ВСЕГДА оставляй дословной подстрокой �
 Ты ОБЯЗАН вернуть topic_ru, topic_en и 3-5 steps. Если данных немного — делай более общий, но строго подтверждённый чеклист."""
 
     payload = {
-        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:1.5b-instruct"),
         "stream": False,
         "think": False,
         "keep_alive": os.getenv("AUTOPUBLISH_QWEN_KEEP_ALIVE", "30m"),
@@ -437,8 +437,8 @@ evidence ВСЕГДА оставляй дословной подстрокой �
         ],
         "options": {
             "temperature": 0.1,
-            "num_predict": max(256, int(os.getenv("AUTOPUBLISH_QWEN_NUM_PREDICT", "550"))),
-            "num_ctx": max(2048, int(os.getenv("AUTOPUBLISH_QWEN_NUM_CTX", "4096"))),
+            "num_predict": max(256, int(os.getenv("AUTOPUBLISH_QWEN_NUM_PREDICT", "480"))),
+            "num_ctx": max(2048, int(os.getenv("AUTOPUBLISH_QWEN_NUM_CTX", "3072"))),
         },
     }
 
