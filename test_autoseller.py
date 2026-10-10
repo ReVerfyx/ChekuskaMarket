@@ -44,6 +44,51 @@ class AutoSellerTest(unittest.TestCase):
         self.assertLessEqual(len(ru), 120)
         self.assertLessEqual(len(en), 120)
 
+    def test_two_sources_override_old_env_and_allow_translation(self):
+        sources = [
+            {
+                "title":"English source A",
+                "url":"https://a.example/x",
+                "snippet":"This beginner guide explains safe early progression and recommends learning the basic controls before advanced systems.",
+                "domain":"a.example",
+            },
+            {
+                "title":"English source B",
+                "url":"https://b.example/x",
+                "snippet":"Another guide recommends reading quest text carefully and using beginner tutorials before harder activities.",
+                "domain":"b.example",
+            },
+        ]
+        fake = {
+            "topic_ru":"Безопасный старт",
+            "topic_en":"Safe start",
+            "steps":[
+                {
+                    "text_ru":"Сначала изучите базовое управление и начальные механики игры.",
+                    "text_en":"First learn the basic controls and the game's starting mechanics.",
+                    "source_id":1,
+                    "evidence":"recommends learning the basic controls before advanced systems",
+                },
+                {
+                    "text_ru":"Читайте задания внимательно перед переходом к более сложным активностям.",
+                    "text_en":"Read quest text carefully before moving to harder activities.",
+                    "source_id":2,
+                    "evidence":"recommends reading quest text carefully and using beginner tutorials",
+                },
+                {
+                    "text_ru":"Используйте обучающие материалы для новичков перед сложными системами.",
+                    "text_en":"Use beginner tutorials before tackling more advanced systems.",
+                    "source_id":2,
+                    "evidence":"using beginner tutorials before harder activities",
+                },
+            ],
+        }
+        with patch.dict(os.environ, {"AUTOPUBLISH_MIN_SOURCES":"7"}), patch.object(autoseller, "ask_qwen", return_value=fake):
+            guide = autoseller.make_guide("Game", sources)
+        self.assertIsNotNone(guide)
+        self.assertIn("🇷🇺 РУССКИЙ", guide["guide"])
+        self.assertIn("🇬🇧 ENGLISH", guide["guide"])
+
     def test_guide_rejects_unverified_evidence(self):
         sources = [
             {"title":"a","url":"https://a.example/x","snippet":"A real snippet long enough about gameplay mechanics and beginner controls for testing.","domain":"a.example"},
