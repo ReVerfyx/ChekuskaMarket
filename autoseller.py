@@ -211,7 +211,7 @@ text_en и topic_en — только перевод русской версии,
         },
     }
 
-    timeout = max(30, int(os.getenv("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "120")))
+    timeout = max(120, int(os.getenv("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "120")))
     heartbeat = max(2.0, float(os.getenv("AUTOPUBLISH_LOG_HEARTBEAT_SECONDS", "5")))
     started = time.monotonic()
     request_json = json.dumps(payload, ensure_ascii=False)
