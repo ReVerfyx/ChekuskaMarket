@@ -15,6 +15,10 @@ class AutoSellerTest(unittest.TestCase):
             category=SimpleNamespace(id=cid, name=game),
         )
 
+    def test_language_hint(self):
+        self.assertEqual(autoseller.language_hint("This is an English gameplay guide with several useful tips."), "en")
+        self.assertEqual(autoseller.language_hint("Это русский гайд для начинающих игроков с полезными советами."), "ru")
+
     def test_search_game_name_strips_funpay_region(self):
         self.assertEqual(autoseller.search_game_name("World of Warcraft (RU, EU)"), "World of Warcraft")
         self.assertEqual(autoseller.search_game_name("Lineage 2 (RU)"), "Lineage 2")
