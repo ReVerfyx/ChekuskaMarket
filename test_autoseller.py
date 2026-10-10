@@ -48,6 +48,31 @@ class AutoSellerTest(unittest.TestCase):
         self.assertEqual(calls, ["yahoo"])
         self.assertEqual({x["domain"] for x in results}, {"a.example", "b.example"})
 
+    def test_parse_yahoo_fallback(self):
+        html = b"""
+        <html><body>
+          <div class="algo">
+            <h3><a href="https://a.example/guide">Guide A</a></h3>
+            <div class="compText">A useful beginner gameplay guide with enough text for the fallback parser.</div>
+          </div>
+        </body></html>
+        """
+        rows = autoseller._parse_yahoo_results(html)
+        self.assertEqual(rows[0]["href"], "https://a.example/guide")
+        self.assertIn("beginner gameplay", rows[0]["body"])
+
+    def test_parse_bing_rss_fallback(self):
+        rss = b"""<?xml version="1.0"?>
+        <rss><channel><item>
+          <title>Guide B</title>
+          <link>https://b.example/wiki</link>
+          <description>Another useful beginner guide with enough text for the backup search parser.</description>
+        </item></channel></rss>
+        """
+        rows = autoseller._parse_bing_rss(rss)
+        self.assertEqual(rows[0]["href"], "https://b.example/wiki")
+        self.assertIn("backup search", rows[0]["body"])
+
     def test_search_game_name_strips_funpay_region(self):
         self.assertEqual(autoseller.search_game_name("World of Warcraft (RU, EU)"), "World of Warcraft")
         self.assertEqual(autoseller.search_game_name("Lineage 2 (RU)"), "Lineage 2")
