@@ -91,7 +91,8 @@ def write_env(path: Path, env: dict[str, str]) -> None:
         "AUTOPUBLISH_SEARCH_RESULTS", "AUTOPUBLISH_MIN_SOURCES",
         "AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "AUTOPUBLISH_QWEN_NUM_PREDICT",
         "AUTOPUBLISH_QWEN_NUM_CTX", "AUTOPUBLISH_QWEN_MAX_SOURCES",
-        "AUTOPUBLISH_QWEN_KEEP_ALIVE",
+        "AUTOPUBLISH_QWEN_KEEP_ALIVE", "AUTOPUBLISH_LOG_HEARTBEAT_SECONDS",
+        "AUTOPUBLISH_FUNPAY_FORM_TIMEOUT_SECONDS", "AUTOPUBLISH_FUNPAY_SAVE_TIMEOUT_SECONDS",
         "AUTOPUBLISH_GUIDE_MAX_CHARS", "AUTOPUBLISH_STOCK_COPIES",
         "AUTOPUBLISH_DELAY_SECONDS", "AUTOPUBLISH_INTERVAL_SECONDS",
         "AUTOPUBLISH_MAX_NEW_PER_CYCLE",
@@ -176,12 +177,15 @@ def main() -> None:
         ask_int("Минимум разных источников для публикации", int(env.get("AUTOPUBLISH_MIN_SOURCES", "2")), 2)
     )
     env["AUTOPUBLISH_QWEN_TIMEOUT_SECONDS"] = str(
-        ask_int("Жёсткий таймаут Qwen на одну игру, секунд", int(env.get("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "45")), 10)
+        ask_int("Жёсткий таймаут Qwen на одну игру, секунд", int(env.get("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "120")), 120)
     )
     env.setdefault("AUTOPUBLISH_QWEN_NUM_PREDICT", "550")
     env.setdefault("AUTOPUBLISH_QWEN_NUM_CTX", "4096")
     env.setdefault("AUTOPUBLISH_QWEN_MAX_SOURCES", "6")
     env.setdefault("AUTOPUBLISH_QWEN_KEEP_ALIVE", "30m")
+    env.setdefault("AUTOPUBLISH_LOG_HEARTBEAT_SECONDS", "5")
+    env.setdefault("AUTOPUBLISH_FUNPAY_FORM_TIMEOUT_SECONDS", "60")
+    env.setdefault("AUTOPUBLISH_FUNPAY_SAVE_TIMEOUT_SECONDS", "60")
     env["AUTOPUBLISH_DELAY_SECONDS"] = str(
         ask_int("Пауза между публикациями, секунд", int(float(env.get("AUTOPUBLISH_DELAY_SECONDS", "15"))), 5)
     )
