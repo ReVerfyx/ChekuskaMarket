@@ -12,9 +12,10 @@ import signal
 import subprocess
 import threading
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, quote_plus, unquote, urlparse
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 
 from bs4 import BeautifulSoup
 from ddgs import DDGS
@@ -163,6 +164,110 @@ def search_game_name(game):
     return re.sub(r"\s+", " ", value).strip() or str(game).strip()
 
 
+def _clean_search_text(value):
+    return re.sub(r"\s+", " ", BeautifulSoup(str(value or ""), "html.parser").get_text(" ", strip=True)).strip()
+
+
+def _unwrap_yahoo_url(url):
+    value = str(url or "")
+    if "r.search.yahoo.com" not in value:
+        return value
+    match = re.search(r"/RU=([^/]+)/RK=", value)
+    return unquote(match.group(1)) if match else value
+
+
+def _direct_http_get(url, timeout):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+            "Accept-Language": "en-US,en;q=0.8,ru;q=0.6",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return response.read()
+
+
+def _parse_yahoo_results(payload):
+    soup = BeautifulSoup(payload, "html.parser")
+    rows = []
+    for block in soup.select("div.algo, div.dd.algo"):
+        link = block.select_one("h3 a")
+        if link is None:
+            continue
+        url = _unwrap_yahoo_url(link.get("href", ""))
+        snippet_node = block.select_one(".compText, .compText.aAbs, p")
+        snippet = _clean_search_text(snippet_node.get_text(" ", strip=True) if snippet_node else "")
+        title = _clean_search_text(link.get_text(" ", strip=True))
+        if url and title:
+            rows.append({"title": title, "href": url, "body": snippet})
+    return rows
+
+
+def _parse_bing_rss(payload):
+    root = ET.fromstring(payload)
+    rows = []
+    for item in root.findall(".//item"):
+        title = _clean_search_text(item.findtext("title") or "")
+        url = str(item.findtext("link") or "").strip()
+        snippet = _clean_search_text(item.findtext("description") or "")
+        if url and title:
+            rows.append({"title": title, "href": url, "body": snippet})
+    return rows
+
+
+def _direct_fallback_search(query, timeout):
+    engines = [
+        (
+            "Yahoo direct",
+            "https://search.yahoo.com/search?p=" + quote_plus(query),
+            _parse_yahoo_results,
+        ),
+        (
+            "Bing RSS",
+            "https://www.bing.com/search?format=rss&q=" + quote_plus(query),
+            _parse_bing_rss,
+        ),
+    ]
+    for name, url, parser in engines:
+        started = time.monotonic()
+        LOG.info("   🛟 Запасной поиск — %s", name)
+        try:
+            payload = _direct_http_get(url, timeout)
+            rows = parser(payload)
+            LOG.info("   ✅ %s — %.1f сек — %s результатов", name, time.monotonic() - started, len(rows))
+            yield name, rows
+        except Exception as exc:
+            LOG.warning("   ⚠️ %s — %.1f сек — %s", name, time.monotonic() - started, type(exc).__name__)
+            if verbose_tracebacks():
+                LOG.exception("DEBUG fallback search %s query=%r", name, query)
+
+
+def _append_search_rows(out, seen_urls, seen_domains, rows):
+    added = 0
+    for row in rows or []:
+        url = str(row.get("href", "") or "")
+        snippet = re.sub(r"\s+", " ", str(row.get("body", "") or "")).strip()
+        host = domain(url)
+        if (
+            not url.startswith(("https://", "http://"))
+            or not host
+            or url in seen_urls
+            or len(snippet) < 40
+        ):
+            continue
+        seen_urls.add(url)
+        seen_domains.add(host)
+        out.append({
+            "title": str(row.get("title", "") or "")[:180],
+            "url": url,
+            "snippet": snippet[:900],
+            "domain": host,
+        })
+        added += 1
+    return added
+
+
 def _search_one_backend(search, query, backend, max_results, timeout):
     started = time.monotonic()
     old_handler = None
@@ -245,27 +350,7 @@ def search_game(game):
                     LOG.exception("DEBUG search backend=%s query=%r", backend, query)
                 continue
 
-            added = 0
-            for row in results or []:
-                url = str(row.get("href", "") or "")
-                snippet = re.sub(r"\s+", " ", str(row.get("body", "") or "")).strip()
-                host = domain(url)
-                if (
-                    not url.startswith(("https://", "http://"))
-                    or not host
-                    or url in seen_urls
-                    or len(snippet) < 70
-                ):
-                    continue
-                seen_urls.add(url)
-                seen_domains.add(host)
-                out.append({
-                    "title": str(row.get("title", "") or "")[:180],
-                    "url": url,
-                    "snippet": snippet[:900],
-                    "domain": host,
-                })
-                added += 1
+            added = _append_search_rows(out, seen_urls, seen_domains, results)
 
             LOG.info(
                 "   ✅ %s — %.1f сек — +%s | сайтов=%s",
@@ -281,6 +366,17 @@ def search_game(game):
 
         if query_index < len(queries):
             LOG.info("   🔁 Пока меньше 2 сайтов — меняю поисковый запрос")
+
+    if len(seen_domains) < target_domains and os.getenv("AUTOPUBLISH_FALLBACK_SEARCH", "1") != "0":
+        LOG.warning("   🛟 DDGS не собрал 2 сайта — включаю прямой запасной поиск")
+        fallback_timeout = max(3, int(os.getenv("AUTOPUBLISH_FALLBACK_TIMEOUT_SECONDS", "8")))
+        for query in queries:
+            for engine_name, rows in _direct_fallback_search(query, fallback_timeout):
+                added = _append_search_rows(out, seen_urls, seen_domains, rows)
+                LOG.info("   📚 %s добавил +%s | сайтов=%s", engine_name, added, len(seen_domains))
+                if len(seen_domains) >= target_domains:
+                    LOG.info("   ✅ Запасной поиск спас запрос: %s результатов / %s сайта", len(out), len(seen_domains))
+                    return out
 
     LOG.info("   🌐 Итого: %s результатов / %s сайтов", len(out), len(seen_domains))
     return out
