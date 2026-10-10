@@ -19,6 +19,35 @@ class AutoSellerTest(unittest.TestCase):
         self.assertEqual(autoseller.language_hint("This is an English gameplay guide with several useful tips."), "en")
         self.assertEqual(autoseller.language_hint("Это русский гайд для начинающих игроков с полезными советами."), "ru")
 
+    def test_search_uses_explicit_backends_and_stops_at_two_domains(self):
+        calls = []
+
+        class FakeDDGS:
+            def __init__(self, timeout=None):
+                self.timeout = timeout
+
+            def text(self, query, max_results=None, backend=None, safesearch=None):
+                calls.append(backend)
+                if backend == "yahoo":
+                    return [
+                        {"title":"A","href":"https://a.example/guide","body":"A long enough gameplay guide snippet with useful beginner information and several practical tips."},
+                        {"title":"B","href":"https://b.example/wiki","body":"Another long enough gameplay guide snippet with different useful beginner information and practical tips."},
+                    ]
+                raise AssertionError("search should stop after two domains")
+
+        with patch.object(autoseller, "DDGS", FakeDDGS), patch.dict(
+            os.environ,
+            {
+                "AUTOPUBLISH_SEARCH_BACKENDS":"yahoo,startpage,bing,wikipedia",
+                "AUTOPUBLISH_SEARCH_TIMEOUT_SECONDS":"6",
+                "AUTOPUBLISH_SEARCH_RESULTS":"6",
+            },
+        ):
+            results = autoseller.search_game("Game (RU)")
+
+        self.assertEqual(calls, ["yahoo"])
+        self.assertEqual({x["domain"] for x in results}, {"a.example", "b.example"})
+
     def test_search_game_name_strips_funpay_region(self):
         self.assertEqual(autoseller.search_game_name("World of Warcraft (RU, EU)"), "World of Warcraft")
         self.assertEqual(autoseller.search_game_name("Lineage 2 (RU)"), "Lineage 2")
