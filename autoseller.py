@@ -29,6 +29,17 @@ OTHER_WORDS = ("прочее", "другое", "other", "misc")
 BAD_WORDS = ("аккаунт", "account", "валют", "currency", "прокач", "service", "услуг", "предмет", "item")
 
 
+def verbose_tracebacks():
+    return os.getenv("AUTOPUBLISH_DEBUG", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def log_failure(message, *args):
+    if verbose_tracebacks():
+        LOG.exception(message, *args)
+    else:
+        LOG.error(message, *args)
+
+
 class StageTimeout(TimeoutError):
     pass
 
@@ -60,7 +71,7 @@ def run_stage(label, func, timeout=None):
         LOG.info("✅ %s: готово за %.1f сек", label, time.monotonic() - started)
         return result
     except Exception as exc:
-        LOG.exception("❌ %s: ошибка через %.1f сек | %s: %s", label, time.monotonic() - started, type(exc).__name__, exc)
+        log_failure("❌ %s — %.1f сек — %s: %s", label, time.monotonic() - started, type(exc).__name__, exc)
         raise
     finally:
         if old_handler is not None:
@@ -131,21 +142,27 @@ def domain(url):
 def search_game(game):
     year = datetime.now(timezone.utc).year
     queries = [
-        f'"{game}" {year} beginner guide tips',
-        f'"{game}" official guide mechanics',
-        f'"{game}" wiki beginner tips',
+        ("свежий beginner-гайд", f'"{game}" {year} beginner guide tips'),
+        ("официальные механики", f'"{game}" official guide mechanics'),
+        ("wiki / beginner tips", f'"{game}" wiki beginner tips'),
     ]
     out, seen = [], set()
     max_results = max(4, int(os.getenv("AUTOPUBLISH_SEARCH_RESULTS", "8")))
     with DDGS(timeout=20) as search:
-        for index, query in enumerate(queries, 1):
+        for index, (label, query) in enumerate(queries, 1):
             started = time.monotonic()
-            LOG.info("🔍 %s: поиск [%s/%s] %r | max_results=%s", game, index, len(queries), query, max_results)
+            LOG.info("   🔎 Поиск %s/%s — %s", index, len(queries), label)
             try:
                 results = search.text(query, max_results=max_results)
             except Exception as exc:
-                LOG.exception("⚠️ %s: поиск [%s/%s] упал через %.1f сек | %s: %s", game, index, len(queries), time.monotonic() - started, type(exc).__name__, exc)
+                LOG.warning(
+                    "   ⚠️ Поиск %s/%s — %.1f сек — %s: %s",
+                    index, len(queries), time.monotonic() - started, type(exc).__name__, str(exc)[:180]
+                )
+                if verbose_tracebacks():
+                    LOG.exception("DEBUG traceback поиска %s", game)
                 continue
+
             added = 0
             for row in results or []:
                 url = str(row.get("href", "") or "")
@@ -162,11 +179,17 @@ def search_game(game):
                 })
                 added += 1
                 if len(out) >= 12:
-                    LOG.info("✅ %s: поиск закончен досрочно | всего=%s | доменов=%s", game, len(out), len({x["domain"] for x in out}))
+                    LOG.info("   ✅ Источники: %s результатов / %s сайтов", len(out), len({x["domain"] for x in out}))
                     return out
-            LOG.info("✅ %s: поиск [%s/%s] закончен за %.1f сек | +%s | всего=%s", game, index, len(queries), time.monotonic() - started, added, len(out))
+
+            LOG.info(
+                "   ✅ Поиск %s/%s — %.1f сек — +%s результатов",
+                index, len(queries), time.monotonic() - started, added
+            )
             if len(out) >= 6 and len({x["domain"] for x in out}) >= 3:
-                return out
+                break
+
+    LOG.info("   🌐 Итого: %s результатов / %s сайтов", len(out), len({x["domain"] for x in out}))
     return out
 
 
@@ -216,8 +239,8 @@ text_en и topic_en — только перевод русской версии,
     started = time.monotonic()
     request_json = json.dumps(payload, ensure_ascii=False)
     LOG.info(
-        "▶️ QWEN %s: модель=%s | sources=%s | prompt_bytes=%s | max_tokens=%s | timeout=%ss",
-        game, payload["model"], len(rows), len(request_json.encode("utf-8")), payload["options"]["num_predict"], timeout
+        "   🤖 Qwen — %s | %s источников | лимит %s сек",
+        payload["model"], len(rows), timeout
     )
 
     proc = subprocess.Popen(
@@ -239,52 +262,56 @@ text_en и topic_en — только перевод русской версии,
 
     while proc.poll() is None:
         elapsed = time.monotonic() - started
-        if elapsed >= timeout:
-            LOG.error("⏱️ QWEN %s: достигнут hard-timeout %.1f сек, убиваю curl", game, elapsed)
+        remaining = timeout - elapsed
+        if remaining <= 0:
+            LOG.error("   ❌ Qwen — таймаут %s сек, запрос остановлен", timeout)
             proc.kill()
             proc.wait(timeout=5)
             return None
-        LOG.info("⏳ QWEN %s: жду ответ... %.1f/%s сек", game, elapsed, timeout)
-        time.sleep(min(heartbeat, max(0.2, timeout - elapsed)))
+        try:
+            proc.wait(timeout=min(heartbeat, remaining))
+        except subprocess.TimeoutExpired:
+            elapsed = time.monotonic() - started
+            LOG.info("   ⏳ Qwen думает… %.0f/%s сек", elapsed, timeout)
 
     elapsed = time.monotonic() - started
     stdout = proc.stdout.read() if proc.stdout is not None else ""
     stderr = proc.stderr.read() if proc.stderr is not None else ""
-    LOG.info("⬅️ QWEN %s: процесс завершён | rc=%s | %.1f сек | stdout=%sB | stderr=%sB", game, proc.returncode, elapsed, len(stdout.encode("utf-8")), len(stderr.encode("utf-8")))
+    LOG.info("   ↩️ Qwen завершил запрос — %.1f сек", elapsed)
 
     if proc.returncode != 0:
-        LOG.error("❌ QWEN %s: curl rc=%s | stderr=%r | stdout_head=%r", game, proc.returncode, stderr[:500], stdout[:500])
+        LOG.error("   ❌ Qwen — curl rc=%s — %s", proc.returncode, (stderr.strip() or stdout.strip())[:240])
         return None
 
     try:
         envelope = json.loads(stdout)
     except json.JSONDecodeError as exc:
-        LOG.error("❌ QWEN %s: внешний JSON Ollama не разбирается | %s | head=%r", game, exc, stdout[:700])
+        LOG.error("   ❌ Qwen — ответ Ollama не JSON: %s", exc)
         return None
 
     raw = str((envelope.get("message") or {}).get("content") or "").strip()
     LOG.info(
-        "🧠 QWEN %s: ответ получен | content_chars=%s | done_reason=%r | eval_count=%r | eval_duration=%r",
-        game, len(raw), envelope.get("done_reason"), envelope.get("eval_count"), envelope.get("eval_duration")
+        "   🧠 Qwen ответил — %s символов | токенов=%s",
+        len(raw), envelope.get("eval_count", "?")
     )
     if not raw:
-        LOG.error("❌ QWEN %s: message.content пустой | envelope_keys=%s", game, sorted(envelope.keys()))
+        LOG.error("   ❌ Qwen — пустой message.content")
         return None
 
     try:
         parsed_content = json.loads(raw)
-        LOG.info("✅ QWEN %s: JSON контента валиден", game)
+        LOG.info("   ✅ Qwen JSON проверен")
         return parsed_content
     except json.JSONDecodeError as first_exc:
         found = re.search(r"\{.*\}", raw, re.S)
         if found:
             try:
                 parsed_content = json.loads(found.group())
-                LOG.warning("⚠️ QWEN %s: JSON извлечён из лишнего текста модели", game)
+                LOG.warning("   ⚠️ Qwen добавил лишний текст — JSON удалось извлечь")
                 return parsed_content
             except json.JSONDecodeError:
                 pass
-        LOG.error("❌ QWEN %s: контент невалидный JSON | %s | head=%r", game, first_exc, raw[:700])
+        LOG.error("   ❌ Qwen вернул невалидный JSON: %s", first_exc)
         return None
 
 
@@ -519,13 +546,12 @@ def publish_one(account, category, sections, state):
         LOG.warning("⏭️ %s: нет подходящего обычного раздела", game)
         return "unsupported"
 
-    LOG.info("🔎 %s: ищу источники...", game)
+    LOG.info("   🔎 Ищу источники…")
     sources = search_game(game)
-    LOG.info("🌐 %s: найдено %s результатов из %s доменов", game, len(sources), len({x["domain"] for x in sources}))
-    LOG.info("🤖 %s: отправляю найденное в Qwen...", game)
+    LOG.info("   🌐 Найдено: %s результатов / %s сайтов", len(sources), len({x["domain"] for x in sources}))
     generated = make_guide(game, sources)
     if not generated:
-        LOG.warning("⏭️ %s: недостаточно подтверждённых данных, лот пока не создаю", game)
+        LOG.warning("   ⏭️ Недостаточно подтверждённых данных — пропуск до следующего прохода")
         state["categories"][key] = {"game": game, "status": "research_failed", "updated_at": utcnow()}
         save_state(state)
         return "research_failed"
@@ -534,10 +560,7 @@ def publish_one(account, category, sections, state):
     title_ru = title_ru_for(game, generated["topic_ru"])
     title_en = title_en_for(game, generated["topic_en"])
     price = price_for(account, node_id)
-    LOG.info(
-        "📝 %s: готов лот | раздел=%s | цена=%s ₽ | RU=%s | EN=%s",
-        game, getattr(section, "name", node_id), price, title_ru, title_en
-    )
+    LOG.info("   📝 Лот подготовлен — раздел «%s» | %s ₽", getattr(section, "name", node_id), price)
 
     if bot.DRY_RUN:
         print(f"[DRY_RUN publish] {cid} | {game} | node={node_id} | {price} | {title_ru} | {title_en}")
@@ -551,11 +574,11 @@ def publish_one(account, category, sections, state):
     form_timeout = max(15, int(os.getenv("AUTOPUBLISH_FUNPAY_FORM_TIMEOUT_SECONDS", "60")))
     save_timeout = max(15, int(os.getenv("AUTOPUBLISH_FUNPAY_SAVE_TIMEOUT_SECONDS", "60")))
     fields = run_stage(
-        f"FUNPAY {game}: получить форму node={node_id}",
+        f"FunPay: получение формы (node={node_id})",
         lambda: create_fields(account, node_id),
         timeout=form_timeout,
     )
-    LOG.info("✍️ FUNPAY %s: заполняю RU/EN поля, цену, флаги и автовыдачу", game)
+    LOG.info("   ✍️ FunPay — заполняю RU/EN, цену и флаги")
     fields.title_ru = title_ru
     fields.title_en = title_en
     fields.description_ru = description_ru_for(
@@ -581,19 +604,16 @@ def publish_one(account, category, sections, state):
         "title": title_ru, "title_en": title_en, "price": price, "updated_at": utcnow(),
     }
     save_state(state)
-    LOG.info(
-        "📦 %s: автовыдача включена, запас=%s одинаковых выдач, лот остаётся активным после продажи",
-        game, len(fields.secrets)
-    )
-    LOG.info("📤 FUNPAY %s: вызываю save_lot | node=%s | price=%s | stock=%s", game, node_id, price, len(fields.secrets))
+    LOG.info("   📦 Автовыдача — %s единиц | после продажи остаётся активным", len(fields.secrets))
+    LOG.info("   📤 FunPay — отправляю лот…")
     save_started = time.monotonic()
     try:
         result = run_stage(
-            f"FUNPAY {game}: save_lot",
+            "FunPay: сохранение лота",
             lambda: account.save_lot(fields),
             timeout=save_timeout,
         )
-        LOG.info("📨 FUNPAY %s: save_lot вернулся за %.1f сек | result_type=%s | result=%r", game, time.monotonic() - save_started, type(result).__name__, str(result)[:500])
+        LOG.info("   📨 FunPay ответил — %.1f сек", time.monotonic() - save_started)
     except Exception as exc:
         state["categories"][key]["error"] = type(exc).__name__
         state["categories"][key]["error_message"] = str(exc)[:1000]
@@ -604,13 +624,13 @@ def publish_one(account, category, sections, state):
         else:
             state["categories"][key]["status"] = "publish_error"
         save_state(state)
-        LOG.exception("❌ FUNPAY %s: публикация НЕ удалась | %s: %s", game, type(exc).__name__, exc)
+        log_failure("   ❌ FunPay не опубликовал лот — %s: %s", type(exc).__name__, exc)
         raise
 
     state["categories"][key]["status"] = "published"
     state["categories"][key]["updated_at"] = utcnow()
     save_state(state)
-    LOG.info("✅ FUNPAY %s: лот опубликован и state сохранён", game)
+    LOG.info("   ✅ ЛОТ ОПУБЛИКОВАН")
     return "published"
 
 
@@ -626,17 +646,21 @@ def cycle(account):
 
     for index, (category, sections) in enumerate(games, 1):
         current = state["categories"].get(str(int(category.id)), {}).get("status")
-        LOG.info("🎮 [%s/%s] %s | текущий статус: %s", index, len(games), category.name, current or "нет")
+        LOG.info("━━━━━━━━ 🎮 [%s/%s] %s ━━━━━━━━", index, len(games), category.name)
+        LOG.info("   Статус: %s", current or "новая")
         if current in {"published", "attempted", "recovered"}:
-            LOG.info("↪️ %s: уже обработана, пропускаю", category.name)
+            LOG.info("   ↪️ Уже обработана — пропуск")
             counts[current] = counts.get(current, 0) + 1
             continue
         if limit and created >= limit:
             break
         try:
             result = publish_one(account, category, sections, state)
-        except Exception:
-            LOG.exception("%s: publish failed", category.name)
+        except Exception as exc:
+            if verbose_tracebacks():
+                LOG.exception("   ❌ Ошибка обработки %s", category.name)
+            else:
+                LOG.error("   ❌ Ошибка обработки — %s: %s", type(exc).__name__, str(exc)[:300])
             result = "error"
         counts[result] = counts.get(result, 0) + 1
         if result in {"published", "dry_run"}:
@@ -658,7 +682,11 @@ def show_status():
 
 
 def main():
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s")
+    # DDGS and HTTP backends are very noisy at INFO (full URLs, 403/429 responses).
+    # Keep the normal journal readable; AUTOPUBLISH_DEBUG=1 still enables our tracebacks.
+    for logger_name in ("ddgs", "httpx", "httpcore", "urllib3", "primp"):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
     parser = argparse.ArgumentParser(description="ChekuskaMarket autonomous publisher")
     parser.add_argument("mode", choices=("once", "loop", "sections", "status"))
     args = parser.parse_args()

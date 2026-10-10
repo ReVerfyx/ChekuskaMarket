@@ -152,13 +152,14 @@ AUTOPUBLISH_MAX_NEW_PER_CYCLE=0
 `AUTOPUBLISH_MAX_NEW_PER_CYCLE=0` означает: не ограничивать число новых игр за проход. Между попытками остаётся задержка, чтобы не отправлять пачку запросов одновременно.
 
 
-Диагностика подробная: Qwen и FunPay-этапы пишут heartbeat каждые 5 секунд. Таймаут Qwen — минимум 120 секунд на игру. В логах отдельно видно поиск, старт/ожидание/ответ Qwen, получение формы FunPay, заполнение полей, `save_lot`, результат и traceback. Для ошибок публикации в `data/autopublish.json` сохраняются `failed_stage`, `error` и `error_message`.
+Диагностика подробная: Qwen и FunPay-этапы пишут heartbeat каждые 5 секунд. Таймаут Qwen — минимум 120 секунд на игру. В логах отдельно видно поиск, старт/ожидание/ответ Qwen, получение формы FunPay, заполнение полей, `save_lot`, результат и traceback. Для ошибок публикации в `data/autopublish.json` сохраняются `failed_stage`, `error` и `error_message`. Обычный журнал скрывает шум библиотек и длинные traceback; для полной технической диагностики временно включи `AUTOPUBLISH_DEBUG=1`.
 
 Настройки диагностики:
 
 ```env
 AUTOPUBLISH_QWEN_TIMEOUT_SECONDS=120
 AUTOPUBLISH_LOG_HEARTBEAT_SECONDS=5
+AUTOPUBLISH_DEBUG=0
 AUTOPUBLISH_FUNPAY_FORM_TIMEOUT_SECONDS=60
 AUTOPUBLISH_FUNPAY_SAVE_TIMEOUT_SECONDS=60
 ```
