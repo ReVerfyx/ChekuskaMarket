@@ -142,7 +142,7 @@ sudo -u funpay .venv/bin/python bot.py complete ORDER_ID
 AUTOPUBLISH_ENABLED=1
 AUTOPUBLISH_PRICE=1
 AUTOPUBLISH_SEARCH_RESULTS=6
-AUTOPUBLISH_SEARCH_BACKENDS=yahoo,startpage,bing,wikipedia
+AUTOPUBLISH_SEARCH_BACKENDS=yahoo,startpage,wikipedia,grokipedia,mojeek
 AUTOPUBLISH_SEARCH_TIMEOUT_SECONDS=6
 AUTOPUBLISH_FALLBACK_SEARCH=1
 AUTOPUBLISH_FALLBACK_TIMEOUT_SECONDS=8
@@ -223,6 +223,8 @@ journalctl -u chekuska-funpay -f
 ```bash
 cd /opt/chekuska-market && sudo bash update.sh
 ```
+
+Обычное обновление теперь автоматически мигрирует старый `OLLAMA_MODEL=qwen3:4b` или `qwen2.5:3b-instruct` на `qwen2.5:1.5b-instruct`, уменьшает контекст/вывод и убирает неподдерживаемый `bing` из DDGS-backend списка.
 
 ## Важный нюанс
 

@@ -312,7 +312,7 @@ def search_game(game):
         x.strip()
         for x in os.getenv(
             "AUTOPUBLISH_SEARCH_BACKENDS",
-            "yahoo,startpage,bing,wikipedia",
+            "yahoo,startpage,wikipedia,grokipedia,mojeek",
         ).split(",")
         if x.strip()
     ]
