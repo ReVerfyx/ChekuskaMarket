@@ -1,41 +1,54 @@
 #!/usr/bin/env bash
-# Run after uploading FunPay-Qwen-Assistant.zip into the home directory.
-set -euo pipefail
-archive="${1:-$HOME/FunPay-Qwen-Assistant.zip}"
-project="${2:-$HOME/funpay-assistant}"
-if [[ ! -f "$archive" ]]; then
-  printf 'Архив не найден: %s\n' "$archive" >&2
+set -Eeuo pipefail
+
+PROJECT_DIR="${PROJECT_DIR:-/opt/chekuska-market}"
+SERVICE_USER="${SERVICE_USER:-funpay}"
+
+if [[ $(id -u) -ne 0 ]]; then
+  echo "Запусти через sudo: sudo bash install-vps.sh" >&2
   exit 1
 fi
-if [[ $(id -u) -eq 0 ]]; then
-  apt-get update
-  apt-get install -y python3-venv python3-pip unzip
+
+apt-get update
+apt-get install -y git python3 python3-venv python3-pip
+
+if ! id "$SERVICE_USER" >/dev/null 2>&1; then
+  useradd --system --home "$PROJECT_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
+fi
+
+# Script is intended to be run from an already cloned repository.
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ "$SOURCE_DIR" != "$PROJECT_DIR" ]]; then
+  rm -rf "$PROJECT_DIR"
+  git clone https://github.com/ReVerfyx/ChekuskaMarket.git "$PROJECT_DIR"
+fi
+cd "$PROJECT_DIR"
+
+mkdir -p data guides stock vendor
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip wheel
+.venv/bin/pip install -r requirements.txt
+
+if [[ ! -d vendor/FunPayAPI/.git ]]; then
+  rm -rf vendor/FunPayAPI
+  git clone --depth 1 https://github.com/MorikTV/FunPayAPI.git vendor/FunPayAPI
 else
-  sudo apt-get update
-  sudo apt-get install -y python3-venv python3-pip unzip
+  git -C vendor/FunPayAPI pull --ff-only
 fi
-mkdir -p "$project"
-if [[ -f "$project/catalog.json" ]]; then
-  cp -p "$project/catalog.json" "$project/catalog.json.before-update"
+
+if [[ ! -f .env ]]; then
+  cp .env.example .env
 fi
-unzip -o "$archive" -d "$project"
-if [[ -f "$project/catalog.json.before-update" ]]; then
-  python3 - "$project" <<'PY'
-import json, sys
-from pathlib import Path
-root = Path(sys.argv[1])
-before = json.loads((root / "catalog.json.before-update").read_text(encoding="utf-8"))
-current = json.loads((root / "catalog.json").read_text(encoding="utf-8"))
-seen = {item["sku"] for item in current}
-current.extend(item for item in before if item.get("kind") == "guide" and item.get("sku") not in seen)
-(root / "catalog.json").write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-(root / "catalog.json.before-update").unlink()
-PY
-fi
-cd "$project"
-bash setup.sh
-printf '\nУстановлено в %s\n' "$project"
-printf 'Для ИИ установите Ollama по официальной инструкции и выполните: ollama pull qwen3:4b\n'
-printf 'Проверка: .venv/bin/python bot.py catalog\n'
-printf 'Обработка заказов: .venv/bin/python bot.py run\n'
-printf 'Поиск и лоты: .venv/bin/python autoseller.py loop\n'
+chmod 600 .env
+chown -R "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR"
+
+cp systemd/chekuska-funpay.service /etc/systemd/system/
+cp systemd/chekuska-raise.service /etc/systemd/system/
+systemctl daemon-reload
+
+echo
+printf 'Установлено: %s\n' "$PROJECT_DIR"
+echo "1) nano $PROJECT_DIR/.env"
+echo "2) sudo -u $SERVICE_USER $PROJECT_DIR/.venv/bin/python $PROJECT_DIR/bot.py catalog"
+echo "3) systemctl enable --now chekuska-funpay"
+echo "4) опционально: systemctl enable --now chekuska-raise"

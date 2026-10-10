@@ -1,66 +1,26 @@
 [
   {
-    "sku": "roblox_security_guide",
-    "match": "Гайд Roblox: защита аккаунта и завершение сеансов",
-    "kind": "guide",
-    "auto_delivery": true,
-    "guide_file": "roblox-security.txt",
-    "instructions": "Спасибо за покупку. Это мой короткий чеклист по настройкам Roblox; базовые сведения также бесплатно доступны в справке Roblox. Текст ниже."
+    "sku": "example_text",
+    "match": "ChekuskaMarket TEST TEXT",
+    "kind": "text",
+    "enabled": false,
+    "delivery_file": "example.txt",
+    "instructions": "Спасибо за покупку. Материал ниже."
   },
   {
-    "sku": "roblox_private_server_guide",
-    "match": "Гайд Roblox: приватный сервер и доступ друзьям",
-    "kind": "guide",
-    "guide_file": "private-server.txt",
-    "instructions": "Спасибо за покупку. Ниже мой короткий чеклист по приватному серверу; официальная справка Roblox доступна бесплатно.",
-    "auto_delivery": true
+    "sku": "example_stock",
+    "match": "ChekuskaMarket TEST STOCK",
+    "kind": "stock",
+    "enabled": false,
+    "stock_file": "example-stock.txt",
+    "instructions": "Спасибо за покупку. Ваш товар ниже.",
+    "out_of_stock_message": "Склад закончился. Продавец проверит заказ вручную."
   },
   {
-    "sku": "studio_luau_first_script",
-    "match": "Гайд Roblox Studio: первый Luau скрипт",
-    "kind": "guide",
-    "guide_file": "studio-luau.txt",
-    "instructions": "Спасибо за покупку. Ниже мой учебный пример с объяснением; документация Roblox Studio бесплатна.",
-    "auto_delivery": true
-  },
-  {
-    "sku": "steal_egg_start_guide",
-    "match": "Гайд Steal An Egg: старт и проверка прогресса",
-    "kind": "guide",
-    "guide_file": "steal-egg-start.txt",
-    "instructions": "Спасибо. Ниже короткий авторский чеклист по старту в Steal An Egg. Описание игры бесплатно доступно на официальной странице Roblox; здесь порядок действий и отметки для собственного прогресса.",
-    "auto_delivery": true
-  },
-  {
-    "sku": "steal_egg_leveling",
-    "match": "Roblox Steal An Egg: прокачка Speed на дорожке",
+    "sku": "example_service",
+    "match": "ChekuskaMarket TEST SERVICE",
     "kind": "service",
     "enabled": false,
-    "game": "steal_egg",
-    "instructions": "Спасибо за заказ на прокачку Speed в Steal An Egg. Напишите /level ВашНик ЦельSpeed, например /level MyNick 100. Speed набирается тренировкой на беговой дорожке. Для доступа подтвердите вход на устройстве исполнителя со своего устройства только после согласования времени. Не присылайте в чат пароль, почтовый код, cookie или токен. Я сообщу о проверенном значении Speed; после работы исполнитель выйдет из аккаунта. Вы можете завершить другие сеансы и сменить пароль."
-  },
-  {
-    "sku": "pc_optimization_guide",
-    "match": "Гайд: оптимизация ПК и игр, FPS и фоновые процессы",
-    "kind": "guide",
-    "guide_file": "pc-optimization.txt",
-    "category_keywords": [
-      "компьютер",
-      "windows",
-      "pc"
-    ],
-    "instructions": "Спасибо за покупку. Ниже авторский чеклист. Его официальные первоисточники доступны бесплатно; гарантированного прироста FPS нет.",
-    "auto_delivery": true
-  },
-  {
-    "sku": "roblox_optimization_guide",
-    "match": "Гайд Roblox: оптимизация FPS и устранение лагов",
-    "kind": "guide",
-    "guide_file": "roblox-optimization.txt",
-    "category_keywords": [
-      "roblox"
-    ],
-    "instructions": "Спасибо за покупку. Ниже авторский чеклист. Его официальные первоисточники доступны бесплатно; гарантированного прироста FPS нет.",
-    "auto_delivery": true
+    "instructions": "Спасибо за заказ. Напишите данные, которые нужны для выполнения услуги. Не отправляйте пароли, OTP, cookie или токены."
   }
 ]
