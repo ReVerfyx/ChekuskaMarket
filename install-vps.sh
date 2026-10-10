@@ -12,16 +12,41 @@ fi
 apt-get update
 apt-get install -y git curl ca-certificates python3 python3-venv python3-pip sudo
 
+# Always synchronize the application before setup. If this script itself was old,
+# restart from the freshly synchronized copy so the rest of installation uses new code.
+SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ "${CHEKUSKA_SYNCED:-0}" != "1" ]]; then
+  echo
+  echo "[+] Синхронизирую ChekuskaMarket с GitHub main..."
+
+  if [[ "$SOURCE_DIR" == "$PROJECT_DIR" && -d "$PROJECT_DIR/.git" ]]; then
+    cd "$PROJECT_DIR"
+
+    # Preserve tracked local edits instead of silently deleting them.
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+      BACKUP_NAME="chekuska-installer-backup-$(date +%Y%m%d-%H%M%S)"
+      git stash push -m "$BACKUP_NAME"
+      echo "[!] Локальные изменения сохранены в git stash: $BACKUP_NAME"
+    fi
+
+    git fetch --prune origin main
+    git checkout main
+    git pull --ff-only origin main
+  else
+    rm -rf "$PROJECT_DIR"
+    git clone --branch main --single-branch https://github.com/ReVerfyx/ChekuskaMarket.git "$PROJECT_DIR"
+  fi
+
+  export CHEKUSKA_SYNCED=1
+  exec bash "$PROJECT_DIR/install-vps.sh"
+fi
+
+SOURCE_DIR="$PROJECT_DIR"
+cd "$PROJECT_DIR"
+
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
   useradd --system --home "$PROJECT_DIR" --shell /usr/sbin/nologin "$SERVICE_USER"
 fi
-
-SOURCE_DIR="$(cd "$(dirname "$0")" && pwd)"
-if [[ "$SOURCE_DIR" != "$PROJECT_DIR" ]]; then
-  rm -rf "$PROJECT_DIR"
-  git clone https://github.com/ReVerfyx/ChekuskaMarket.git "$PROJECT_DIR"
-fi
-cd "$PROJECT_DIR"
 
 mkdir -p data guides stock vendor
 python3 -m venv .venv
