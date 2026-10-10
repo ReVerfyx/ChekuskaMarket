@@ -1,0 +1,22 @@
+[Unit]
+Description=ChekuskaMarket FunPay bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=funpay
+Group=funpay
+WorkingDirectory=/opt/chekuska-market
+EnvironmentFile=/opt/chekuska-market/.env
+ExecStart=/opt/chekuska-market/.venv/bin/python /opt/chekuska-market/bot.py run
+Restart=always
+RestartSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/opt/chekuska-market/data /opt/chekuska-market/stock
+
+[Install]
+WantedBy=multi-user.target
