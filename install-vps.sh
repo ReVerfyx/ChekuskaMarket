@@ -71,6 +71,12 @@ systemctl enable --now ollama >/dev/null 2>&1 || true
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
+else
+  # Existing installs keep .env across updates, so migrate old heavy/broken defaults.
+  sed -i -E 's/^OLLAMA_MODEL=(qwen3:4b|qwen2\.5:3b-instruct)$/OLLAMA_MODEL=qwen2.5:1.5b-instruct/' .env
+  sed -i -E 's/^AUTOPUBLISH_QWEN_NUM_PREDICT=(550|1600)$/AUTOPUBLISH_QWEN_NUM_PREDICT=480/' .env
+  sed -i -E 's/^AUTOPUBLISH_QWEN_NUM_CTX=4096$/AUTOPUBLISH_QWEN_NUM_CTX=3072/' .env
+  sed -i -E 's/^AUTOPUBLISH_SEARCH_BACKENDS=.*/AUTOPUBLISH_SEARCH_BACKENDS=yahoo,startpage,wikipedia,grokipedia,mojeek/' .env
 fi
 chmod 600 .env
 chown -R "$SERVICE_USER:$SERVICE_USER" "$PROJECT_DIR"
