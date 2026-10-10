@@ -1,0 +1,8 @@
+.env
+prices.json
+data/
+ideas.json
+__pycache__/
+.venv/
+*.pyc
+extras/downloaded/
