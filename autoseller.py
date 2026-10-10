@@ -139,12 +139,28 @@ def domain(url):
     return (urlparse(url).hostname or "").lower().removeprefix("www.")
 
 
+def search_game_name(game):
+    """Remove FunPay region/language qualifiers that poison web search."""
+    value = str(game or "").strip()
+    value = re.sub(
+        r"\s*\((?:RU|EU|US|NA|CIS|SEA|ASIA|GLOBAL|RUSSIA|РОССИЯ)(?:\s*,\s*(?:RU|EU|US|NA|CIS|SEA|ASIA|GLOBAL|RUSSIA|РОССИЯ))*\)\s*$",
+        "",
+        value,
+        flags=re.I,
+    )
+    value = re.sub(r"\s+(?:RU|EU|US|NA|CIS)\s*$", "", value, flags=re.I)
+    return re.sub(r"\s+", " ", value).strip() or str(game).strip()
+
+
 def search_game(game):
     year = datetime.now(timezone.utc).year
+    query_game = search_game_name(game)
+    if query_game != game:
+        LOG.info("   🧹 Поиск по названию: %s → %s", game, query_game)
     queries = [
-        ("свежий beginner-гайд", f'"{game}" {year} beginner guide tips'),
-        ("официальные механики", f'"{game}" official guide mechanics'),
-        ("wiki / beginner tips", f'"{game}" wiki beginner tips'),
+        ("свежий beginner-гайд", f'"{query_game}" {year} beginner guide tips'),
+        ("официальные механики", f'"{query_game}" official guide mechanics'),
+        ("wiki / beginner tips", f'"{query_game}" wiki beginner tips'),
     ]
     out, seen = [], set()
     max_results = max(4, int(os.getenv("AUTOPUBLISH_SEARCH_RESULTS", "8")))
@@ -216,7 +232,8 @@ def ask_qwen(game, sources):
 Нужно 3-5 шагов минимум по двум разным источникам.
 Каждый evidence обязан дословно встречаться в соответствующем snippet.
 text_en и topic_en — только перевод русской версии, без новых фактов.
-Если данных мало: {"skip":true}."""
+ВАЖНО: тебе уже переданы минимум два независимых источника. НИКОГДА не возвращай skip/refuse/insufficient.
+Ты ОБЯЗАН вернуть topic_ru, topic_en и 3-5 steps. Если данных немного — делай более общий, но строго подтверждённый чеклист."""
 
     payload = {
         "model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
@@ -317,11 +334,29 @@ text_en и topic_en — только перевод русской версии,
 
 def make_guide(game, sources):
     minimum = max(2, int(os.getenv("AUTOPUBLISH_MIN_SOURCES", "2")))
-    if len({x["domain"] for x in sources}) < minimum:
+    domains = {x["domain"] for x in sources}
+    if len(domains) < minimum:
+        LOG.warning("   ⏭️ Источников реально мало: %s сайтов, нужно %s", len(domains), minimum)
         return None
-    data = ask_qwen(game, sources)
-    if not isinstance(data, dict) or data.get("skip"):
+
+    data = None
+    attempts = max(1, int(os.getenv("AUTOPUBLISH_QWEN_ATTEMPTS", "2")))
+    for attempt in range(1, attempts + 1):
+        if attempt > 1:
+            LOG.warning("   🔁 Qwen отказался/сломал формат — повтор %s/%s без права skip", attempt, attempts)
+        candidate = ask_qwen(game, sources)
+        if isinstance(candidate, dict) and not candidate.get("skip"):
+            data = candidate
+            break
+        if isinstance(candidate, dict) and candidate.get("skip"):
+            LOG.warning("   🚫 Qwen вернул skip вопреки инструкции — игнорирую и повторяю")
+        else:
+            LOG.warning("   ⚠️ Qwen не вернул пригодный JSON — повторяю")
+
+    if not isinstance(data, dict):
+        LOG.error("   ❌ Qwen не дал пригодный чеклист после %s попыток", attempts)
         return None
+
     topic_ru = re.sub(r"\s+", " ", str(data.get("topic_ru", "") or "")).strip()
     topic_en = re.sub(r"\s+", " ", str(data.get("topic_en", "") or "")).strip()
     steps = data.get("steps")
@@ -329,6 +364,7 @@ def make_guide(game, sources):
         not topic_ru or not topic_en or len(topic_ru) > 80 or len(topic_en) > 80
         or not isinstance(steps, list) or not 3 <= len(steps) <= 6
     ):
+        LOG.error("   ❌ Qwen JSON валиден, но схема плохая: topic_ru=%r topic_en=%r steps=%s", topic_ru[:40], topic_en[:40], len(steps) if isinstance(steps, list) else type(steps).__name__)
         return None
     clean_ru, clean_en, used_domains, used = [], [], set(), {}
     for step in steps:
@@ -347,9 +383,11 @@ def make_guide(game, sources):
             or not 20 <= len(text_en) <= 350
             or len(evidence) < 12
         ):
+            LOG.error("   ❌ Шаг %s не прошёл проверку формата/evidence", len(clean_ru) + 1)
             return None
         source = sources[sid - 1]
         if evidence not in re.sub(r"\s+", " ", source["snippet"]):
+            LOG.error("   ❌ Шаг %s: evidence не найден дословно в source_id=%s", len(clean_ru) + 1, sid)
             return None
         clean_ru.append(text_ru)
         clean_en.append(text_en)
