@@ -362,7 +362,9 @@ evidence ВСЕГДА оставляй дословной подстрокой �
 
 
 def make_guide(game, sources):
-    minimum = max(2, int(os.getenv("AUTOPUBLISH_MIN_SOURCES", "2")))
+    # ChekuskaMarket publishes as soon as there are two independent source domains.
+    # Ignore stale/custom AUTOPUBLISH_MIN_SOURCES values from old .env files.
+    minimum = 2
     domains = {x["domain"] for x in sources}
     if len(domains) < minimum:
         LOG.warning("   ⏭️ Источников реально мало: %s сайтов, нужно %s", len(domains), minimum)
@@ -423,6 +425,7 @@ def make_guide(game, sources):
         used_domains.add(source["domain"])
         used[sid] = source
     if len(used_domains) < minimum:
+        LOG.error("   ❌ В итоговом гайде использовано только %s разных источников; нужно 2", len(used_domains))
         return None
     lines = [
         "🇷🇺 РУССКИЙ",
