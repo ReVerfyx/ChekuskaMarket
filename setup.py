@@ -159,7 +159,7 @@ def main() -> None:
     env["AI_ENABLED"] = "1" if ai else "0"
     env["OLLAMA_URL"] = safe_value(env.get("OLLAMA_URL", "http://127.0.0.1:11434"), "OLLAMA_URL")
     env["OLLAMA_MODEL"] = safe_value(
-        ask("Модель Ollama", env.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")),
+        ask("Модель Ollama", env.get("OLLAMA_MODEL", "qwen2.5:1.5b-instruct")),
         "OLLAMA_MODEL",
     )
     env["OLLAMA_TIMEOUT_SECONDS"] = str(
@@ -178,8 +178,8 @@ def main() -> None:
     env["AUTOPUBLISH_QWEN_TIMEOUT_SECONDS"] = str(
         ask_int("Жёсткий таймаут Qwen на одну игру, секунд", int(env.get("AUTOPUBLISH_QWEN_TIMEOUT_SECONDS", "120")), 120)
     )
-    env.setdefault("AUTOPUBLISH_QWEN_NUM_PREDICT", "550")
-    env.setdefault("AUTOPUBLISH_QWEN_NUM_CTX", "4096")
+    env.setdefault("AUTOPUBLISH_QWEN_NUM_PREDICT", "480")
+    env.setdefault("AUTOPUBLISH_QWEN_NUM_CTX", "3072")
     env.setdefault("AUTOPUBLISH_QWEN_MAX_SOURCES", "6")
     env.setdefault("AUTOPUBLISH_QWEN_KEEP_ALIVE", "30m")
     env.setdefault("AUTOPUBLISH_LOG_HEARTBEAT_SECONDS", "5")
