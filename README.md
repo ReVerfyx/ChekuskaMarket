@@ -144,6 +144,8 @@ AUTOPUBLISH_PRICE=1
 AUTOPUBLISH_SEARCH_RESULTS=6
 AUTOPUBLISH_SEARCH_BACKENDS=yahoo,startpage,bing,wikipedia
 AUTOPUBLISH_SEARCH_TIMEOUT_SECONDS=6
+AUTOPUBLISH_FALLBACK_SEARCH=1
+AUTOPUBLISH_FALLBACK_TIMEOUT_SECONDS=8
 AUTOPUBLISH_MIN_SOURCES=2  # фиксировано: достаточно 2 разных сайтов
 AUTOPUBLISH_GUIDE_MAX_CHARS=3200
 AUTOPUBLISH_DELAY_SECONDS=15
@@ -151,7 +153,7 @@ AUTOPUBLISH_INTERVAL_SECONDS=1800
 AUTOPUBLISH_MAX_NEW_PER_CYCLE=0
 ```
 
-Поиск не использует `backend=auto`: DuckDuckGo/Brave/Google исключены из обычного поиска на VPS. Бот пробует `Yahoo → Startpage → Bing → Wikipedia`, максимум примерно 6 секунд на один движок, и сразу останавливает поиск после получения 2 разных сайтов.
+Поиск не использует `backend=auto`: DuckDuckGo/Brave/Google исключены из обычного поиска на VPS. Бот пробует `Yahoo → Startpage → Bing → Wikipedia`, максимум примерно 6 секунд на один движок, и сразу останавливается после получения 2 разных сайтов. Если весь DDGS-слой всё равно сломался или не собрал 2 сайта, автоматически включается независимый запасной поиск **напрямую без DDGS**: `Yahoo HTML → Bing RSS`.
 
 `AUTOPUBLISH_MAX_NEW_PER_CYCLE=0` означает: не ограничивать число новых игр за проход. Между попытками остаётся задержка, чтобы не отправлять пачку запросов одновременно.
 
