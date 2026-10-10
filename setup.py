@@ -158,7 +158,7 @@ def main() -> None:
     env["AI_ENABLED"] = "1" if ai else "0"
     env["OLLAMA_URL"] = safe_value(env.get("OLLAMA_URL", "http://127.0.0.1:11434"), "OLLAMA_URL")
     env["OLLAMA_MODEL"] = safe_value(
-        ask("Модель Ollama", env.get("OLLAMA_MODEL", "qwen3:4b")),
+        ask("Модель Ollama", env.get("OLLAMA_MODEL", "qwen2.5:3b-instruct")),
         "OLLAMA_MODEL",
     )
     env["OLLAMA_TIMEOUT_SECONDS"] = str(
