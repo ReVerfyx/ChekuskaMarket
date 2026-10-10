@@ -206,7 +206,7 @@ def model_select_faq(message: str, rows: list[dict]) -> int | None:
         for i, row in enumerate(rows)
     ]
     payload = {
-        "model": os.getenv("OLLAMA_MODEL", "qwen3:4b"),
+        "model": os.getenv("OLLAMA_MODEL", "qwen2.5:3b-instruct"),
         "stream": False,
         "think": False,
         "messages": [
