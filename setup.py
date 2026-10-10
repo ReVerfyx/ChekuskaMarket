@@ -89,8 +89,9 @@ def write_env(path: Path, env: dict[str, str]) -> None:
         "RAISE_CATEGORY_IDS", "RAISE_INTERVAL_SECONDS",
         "AUTOPUBLISH_ENABLED", "AUTOPUBLISH_PRICE",
         "AUTOPUBLISH_SEARCH_RESULTS", "AUTOPUBLISH_MIN_SOURCES",
-        "AUTOPUBLISH_GUIDE_MAX_CHARS", "AUTOPUBLISH_DELAY_SECONDS",
-        "AUTOPUBLISH_INTERVAL_SECONDS", "AUTOPUBLISH_MAX_NEW_PER_CYCLE",
+        "AUTOPUBLISH_GUIDE_MAX_CHARS", "AUTOPUBLISH_STOCK_COPIES",
+        "AUTOPUBLISH_DELAY_SECONDS", "AUTOPUBLISH_INTERVAL_SECONDS",
+        "AUTOPUBLISH_MAX_NEW_PER_CYCLE",
     ]
     keys = preferred + sorted(k for k in env if k not in preferred)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -181,6 +182,9 @@ def main() -> None:
         ask_int("Максимум новых игр за проход (0 = без лимита)", int(env.get("AUTOPUBLISH_MAX_NEW_PER_CYCLE", "0")), 0)
     )
     env.setdefault("AUTOPUBLISH_GUIDE_MAX_CHARS", "3200")
+    env["AUTOPUBLISH_STOCK_COPIES"] = str(
+        ask_int("Запас одинаковых выдач в одном авто-лоте", int(env.get("AUTOPUBLISH_STOCK_COPIES", "50")), 2)
+    )
 
     env.setdefault("DB_PATH", "data/bot.sqlite3")
     env.setdefault("CATALOG_PATH", "catalog.json")
